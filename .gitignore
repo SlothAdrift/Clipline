@@ -14,6 +14,15 @@ design_previews/
 
 # Old checkout and locally generated release/test materials.
 git存档/
-发布版-Windows/
+发布版-Windows/*
+!发布版-Windows/installer.iss
+!发布版-Windows/使用说明.txt
+!发布版-Windows/第三方许可说明.txt
+!发布版-Windows/licenses/
+发布版-Windows/licenses/*
+!发布版-Windows/licenses/LGPL-3.0-only.txt
+!发布版-Windows/文档制作/
+发布版-Windows/文档制作/*
+!发布版-Windows/文档制作/make_manual.py
 resources/
 .pytest_cache/

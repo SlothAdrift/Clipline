@@ -47,7 +47,7 @@ class ClotheslineWindow(QWidget):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("截图晾衣绳")
+        self.setWindowTitle("Clipline")
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setMouseTracking(True)
@@ -863,7 +863,7 @@ class ClotheslineWindow(QWidget):
         p.setBrush(QColor(246, 249, 255, 240))
         p.drawRoundedRect(rect, 16, 16)
         p.setPen(QColor("#33486f"))
-        p.drawText(rect, Qt.AlignCenter, "开启截图晾衣绳功能")
+        p.drawText(rect, Qt.AlignCenter, "开启 Clipline 功能")
 
     def mouseMoveEvent(self, event):
         hit = self._hit(event.position())

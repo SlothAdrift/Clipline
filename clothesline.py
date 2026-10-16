@@ -19,7 +19,7 @@ from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 from line_canvas import ClotheslineWindow
 
-APP_NAME = "截图晾衣绳"
+APP_NAME = "Clipline"
 MAX_IMAGES = 10
 CLIPBOARD_DEDUP_SECONDS = 0.5
 HOTKEYS = ((0x351, 0x0008 | 0x0001, "Win + Alt + L"),
@@ -227,7 +227,7 @@ class ClotheslineApp:
         self.tray = QSystemTrayIcon(icon, app)
         self.tray.setToolTip(APP_NAME)
         menu = QMenu()
-        self.enabled_action = QAction("开启截图晾衣绳功能", menu)
+        self.enabled_action = QAction("开启 Clipline 功能", menu)
         self.enabled_action.setCheckable(True)
         self.enabled_action.setChecked(store.enabled)
         self.enabled_action.triggered.connect(self.toggle)
@@ -364,7 +364,7 @@ class ClotheslineApp:
 
     def confirm_quit(self):
         answer = QMessageBox.question(
-            self.window, "退出应用", "退出截图晾衣绳并停止程序运行？",
+            self.window, "退出应用", "退出 Clipline 并停止程序运行？",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
         )
         if answer == QMessageBox.Yes:
@@ -453,7 +453,7 @@ def main() -> int:
     root.mkdir(parents=True, exist_ok=True)
     lock = QLockFile(str(root / "app.lock"))
     if not lock.tryLock(100):
-        QMessageBox.information(None, APP_NAME, "截图晾衣绳已在运行，请查看系统托盘。")
+        QMessageBox.information(None, APP_NAME, "Clipline 已在运行，请查看系统托盘。")
         return 0
     store = ImageStore(root)
     controller = ClotheslineApp(app, store)

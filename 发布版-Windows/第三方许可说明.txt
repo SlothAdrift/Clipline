@@ -1,0 +1,7 @@
+本程序使用 PySide6 / Qt 6.9.2（LGPL v3）。许可文本见 LGPL-3.0-only.txt。
+Qt for Python：https://doc.qt.io/qtforpython-6/
+Qt 源代码：https://code.qt.io/cgit/pyside/pyside-setup.git/ 和 https://code.qt.io/cgit/qt/
+
+本安装包把 Qt 库作为独立动态库放在安装目录中，用户可在遵守许可条款的前提下替换这些库。本项目未修改 Qt 或 PySide6 本身。
+
+程序由 PyInstaller 6.22.3 打包，安装程序由 Inno Setup 6.7.3 编译。
