@@ -213,6 +213,7 @@ class ClotheslineApp:
         self.clipboard.dataChanged.connect(self.receive_clipboard)
         self.skip_next_clipboard = False
         self.recent_image_digests: dict[bytes, float] = {}
+        self.pending_image_digests: set[bytes] = set()
         self.last_clipboard_sequence: int | None = None
         self.hover_origin: QPoint | None = None
         self.hover_since = 0.0
@@ -268,6 +269,7 @@ class ClotheslineApp:
             self.show()
 
     def receive_clipboard(self):
+        observed_at = time.monotonic()
         sequence = clipboard_sequence()
         if self.skip_next_clipboard:
             self.skip_next_clipboard = False
@@ -287,31 +289,44 @@ class ClotheslineApp:
                 if path.is_file():
                     reader = QImageReader(str(path))
                     if reader.canRead():
-                        self.add_clipboard_image(reader.read())
+                        self.add_clipboard_image(reader.read(), observed_at=observed_at)
                         loaded = True
             if not loaded and mime.hasImage():
-                self.add_clipboard_image(self.clipboard.image())
+                self.add_clipboard_image(self.clipboard.image(), observed_at=observed_at)
         elif mime.hasImage():
-            self.add_clipboard_image(self.clipboard.image())
+            self.add_clipboard_image(self.clipboard.image(), observed_at=observed_at)
 
-    def add_clipboard_image(self, image: QImage):
+    def add_clipboard_image(self, image: QImage, *, observed_at: float | None = None):
         if image.isNull():
             return
+        # Reading/decoding/hashing a large clipboard image may itself be slow.
+        # Judge the notification's age before doing that work.
+        if observed_at is None:
+            observed_at = time.monotonic()
         digest = image_digest(image)
-        now = time.monotonic()
+        if digest in self.pending_image_digests:
+            return
         self.recent_image_digests = {
             value: stamp for value, stamp in self.recent_image_digests.items()
-            if now - stamp < CLIPBOARD_DEDUP_SECONDS
+            if observed_at - stamp < CLIPBOARD_DEDUP_SECONDS
         }
         if digest in self.recent_image_digests:
             return
-        path = self.store.add(image)
-        if path:
-            self.recent_image_digests[digest] = now
-            if not self.window.isVisible():
-                self.window.place()
-            self.window.set_images(self.store.root, self.store.images, added=True)
-            self.window.show_animated()
+        self.pending_image_digests.add(digest)
+        path = None
+        try:
+            path = self.store.add(image)
+            if path:
+                if not self.window.isVisible():
+                    self.window.place()
+                self.window.set_images(self.store.root, self.store.images, added=True)
+                self.window.show_animated()
+        finally:
+            self.pending_image_digests.discard(digest)
+            if path:
+                # Start the grace period AFTER PNG encoding, disk I/O and UI
+                # loading; otherwise a stalled GUI consumes the entire window.
+                self.recent_image_digests[digest] = time.monotonic()
 
     def copy_image(self, name: str):
         image = QImage(str(self.store.root / name))

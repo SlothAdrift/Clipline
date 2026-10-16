@@ -11,7 +11,7 @@ from unittest.mock import Mock, patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QMimeData, QPoint, Qt, QUrl
-from PySide6.QtGui import QImage
+from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import QApplication, QMessageBox
 from shiboken6 import VoidPtr
@@ -19,6 +19,104 @@ from shiboken6 import VoidPtr
 from clothesline import ClotheslineApp, GlobalHotkeyFilter, ImageStore, MAX_IMAGES
 from line_canvas import (CARD_FADE_TIME, COPY_FEEDBACK_TIME, DROP_TIME,
                          MOVE_TIME, RETRACT_TIME, ClotheslineWindow)
+
+
+class ClipboardStallTests(unittest.TestCase):
+    """Use a fake clock, not sleeps, to reproduce delayed clipboard work."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory(dir=Path.cwd())
+        self.addCleanup(self.directory.cleanup)
+        self.controller = ClotheslineApp.__new__(ClotheslineApp)
+        self.controller.store = ImageStore(Path(self.directory.name))
+        self.controller.store.enabled = True
+        self.controller.window = Mock()
+        self.controller.recent_image_digests = {}
+        self.controller.pending_image_digests = set()
+        self.controller.last_clipboard_sequence = None
+        self.controller.skip_next_clipboard = False
+        self.image = QImage(9, 9, QImage.Format_ARGB32)
+        self.image.fill("blue")
+        self.controller.clipboard = Mock()
+        self.controller.clipboard.mimeData.return_value.hasUrls.return_value = False
+        self.controller.clipboard.mimeData.return_value.hasImage.return_value = True
+        self.controller.clipboard.image.return_value = self.image
+        self.clock = 100.0
+        clock_patch = patch("clothesline.time.monotonic", side_effect=lambda: self.clock)
+        clock_patch.start()
+        self.addCleanup(clock_patch.stop)
+
+    def test_slow_save_then_changed_sequence_does_not_duplicate(self):
+        original_add = self.controller.store.add
+
+        def slow_add(image):
+            self.clock += 2.0
+            return original_add(image)
+
+        with patch.object(self.controller.store, "add", side_effect=slow_add):
+            with patch("clothesline.clipboard_sequence", side_effect=[10, 11]):
+                self.controller.receive_clipboard()
+                self.clock += 0.1
+                self.controller.receive_clipboard()
+        self.assertEqual(len(self.controller.store.images), 1)
+
+    def test_slow_preview_does_not_consume_dedup_window(self):
+        def slow_preview(*args, **kwargs):
+            self.clock += 2.0
+
+        self.controller.window.set_images.side_effect = slow_preview
+        self.controller.add_clipboard_image(self.image)
+        self.clock += 0.1
+        self.controller.add_clipboard_image(self.image)
+        self.assertEqual(len(self.controller.store.images), 1)
+
+    def test_slow_clipboard_decode_uses_notification_time(self):
+        self.controller.add_clipboard_image(self.image)
+        self.clock += 0.1
+
+        def slow_read():
+            self.clock += 2.0
+            return self.image
+
+        self.controller.clipboard.image.side_effect = slow_read
+        with patch("clothesline.clipboard_sequence", return_value=11):
+            self.controller.receive_clipboard()
+        self.assertEqual(len(self.controller.store.images), 1)
+
+    def test_reentrant_add_does_not_save_twice(self):
+        original_add = self.controller.store.add
+
+        def reentrant_add(image):
+            self.clock += 2.0
+            self.controller.add_clipboard_image(image)
+            return original_add(image)
+
+        with patch.object(self.controller.store, "add", side_effect=reentrant_add) as add:
+            self.controller.add_clipboard_image(self.image)
+        self.assertEqual(add.call_count, 1)
+        self.assertEqual(len(self.controller.store.images), 1)
+        self.assertEqual(self.controller.pending_image_digests, set())
+
+    def test_failed_save_can_be_retried(self):
+        with patch.object(self.controller.store, "add", return_value=None):
+            self.controller.add_clipboard_image(self.image)
+        self.assertEqual(self.controller.pending_image_digests, set())
+        self.controller.add_clipboard_image(self.image)
+        self.assertEqual(len(self.controller.store.images), 1)
+
+    def test_save_exception_releases_pending_digest(self):
+        with patch.object(self.controller.store, "add", side_effect=OSError("disk error")):
+            with self.assertRaises(OSError):
+                self.controller.add_clipboard_image(self.image)
+        self.assertEqual(self.controller.pending_image_digests, set())
+        self.controller.add_clipboard_image(self.image)
+        self.assertEqual(len(self.controller.store.images), 1)
+
+    def test_intentional_repeat_after_grace_period_still_works(self):
+        self.controller.add_clipboard_image(self.image)
+        self.clock += 0.6
+        self.controller.add_clipboard_image(self.image)
+        self.assertEqual(len(self.controller.store.images), 2)
 
 
 class ClotheslineTests(unittest.TestCase):
@@ -347,6 +445,43 @@ class ClotheslineTests(unittest.TestCase):
         self.assertGreater(frame.pixelColor(int(clip.right()) - 3, 150).alpha(), 100)
         self.assertLess(frame.pixelColor(int(clip.right()) + 1, 150).alpha(), 100)
         window.close()
+
+    def test_real_image_pixels_cannot_bleed_under_navigation_buttons(self):
+        window = ClotheslineWindow()
+        self.addCleanup(window.close)
+        self.addCleanup(window.frame_timer.stop)
+        window.resize(1200, 270)
+        window.set_enabled(True)
+        names = [f"card-{i}.png" for i in range(8)]
+        # Supply real, opaque image pixels: empty frames never exercise the
+        # rounded image clip inside _draw_card.
+        image = QImage(162, 118, QImage.Format_ARGB32)
+        image.fill("magenta")
+        pixmaps = {name: QPixmap.fromImage(image) for name in names}
+        with patch("line_canvas.time.monotonic", return_value=100.0) as clock:
+            window.set_images(Path.cwd(), names)
+            window.show()
+            window.frame_timer.stop()
+            for direction in (1, -1):
+                clock.return_value += 1.0
+                window.navigate(direction)
+                started = window.move_started
+                for fraction in (0.15, 0.25, 0.35, 0.65, 0.75, 0.85):
+                    clock.return_value = started + MOVE_TIME * fraction
+                    for angle in (-3.0, 0.0, 3.0):
+                        window.angles = {name: angle for name in names}
+                        window.update_mask()
+                        window.pixmaps = pixmaps
+                        actual = window.grab().toImage()
+                        window.pixmaps = {}
+                        without_images = window.grab().toImage()
+                        for action, rect in window._buttons().items():
+                            if action in ("left", "right"):
+                                with self.subTest(direction=direction, fraction=fraction,
+                                                  angle=angle, button=action):
+                                    self.assertEqual(actual.copy(rect.toRect()),
+                                                     without_images.copy(rect.toRect()),
+                                                     "移动图片不能改变按钮区域的像素")
 
     def test_outer_shadows_fade_only_with_five_visible_cards(self):
         windows = []

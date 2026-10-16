@@ -690,7 +690,10 @@ class ClotheslineWindow(QWidget):
             p.save()
             clip = QPainterPath()
             clip.addRoundedRect(target, 5, 5)
-            p.setClipPath(clip)
+            # Preserve the outer viewport clip while rounding the image.
+            # ReplaceClip would let sliding pixels bleed under the translucent
+            # navigation buttons, whose regions are included in the window mask.
+            p.setClipPath(clip, Qt.IntersectClip)
             p.drawPixmap(QPointF(target.center().x() - scaled.width() / 2,
                                  target.center().y() - scaled.height() / 2), scaled)
             p.restore()

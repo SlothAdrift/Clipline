@@ -1,12 +1,19 @@
 __pycache__/
-*.py[cod]
+*.pyc
 .pytest_cache/
 .venv/
 build/
 dist/
+design_previews/
 *.spec
 *.exe
 *.msi
 *.log
 *.lock
 .DS_Store
+
+# Old checkout and locally generated release/test materials.
+git存档/
+发布版-Windows/
+resources/
+.pytest_cache/
